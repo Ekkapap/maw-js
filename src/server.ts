@@ -7,6 +7,7 @@ const MAW_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
 import { listSessions, capture, sendKeys, selectWindow } from "./ssh";
 import { processMirror } from "./commands/overview";
 import { MawEngine } from "./engine";
+import { scanTeams } from "./engine.teams";
 import type { FeedEvent } from "./lib/feed";
 import type { WSData } from "./types";
 
@@ -421,6 +422,34 @@ app.post("/api/feed", async (c) => {
   };
   pushFeedEvent(event);
   return c.json({ ok: true });
+});
+
+// --- Agent Teams ---
+import { homedir } from "os";
+
+app.get("/api/teams", (c) => {
+  const teams = scanTeams();
+  return c.json({ teams, total: teams.length });
+});
+
+app.get("/api/teams/:name", (c) => {
+  const name = c.req.param("name");
+  const configPath = join(homedir(), ".claude/teams", name, "config.json");
+  try { return c.json(JSON.parse(readFileSync(configPath, "utf-8"))); }
+  catch { return c.json({ error: "team not found" }, 404); }
+});
+
+app.get("/api/teams/:name/tasks", (c) => {
+  const name = c.req.param("name");
+  const tasksDir = join(homedir(), ".claude/tasks", name);
+  try {
+    const files = readdirSync(tasksDir).filter(f => f.endsWith(".json"));
+    const tasks = files.map(f => {
+      try { return JSON.parse(readFileSync(join(tasksDir, f), "utf-8")); }
+      catch { return null; }
+    }).filter(Boolean);
+    return c.json({ tasks, total: tasks.length });
+  } catch { return c.json({ tasks: [], total: 0 }); }
 });
 
 app.onError((err, c) => c.json({ error: err.message }, 500));

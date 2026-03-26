@@ -11,6 +11,7 @@ import { OverviewGrid } from "./components/OverviewGrid";
 import { OrbitalView } from "./components/OrbitalView";
 import { VSView } from "./components/VSView";
 import { ConfigView } from "./components/ConfigView";
+import { TeamPanel } from "./components/TeamPanel";
 import { TerminalView } from "./components/TerminalView";
 import { InboxOverlay } from "./components/InboxView";
 import { WorktreeView } from "./components/WorktreeView";
@@ -237,7 +238,7 @@ export function App() {
     return () => window.removeEventListener("keydown", handler, true);
   }, []);
 
-  const { sessions, agents, eventLog, addEvent, handleMessage, feedEvents, feedActive, agentFeedLog } = useSessions();
+  const { sessions, agents, eventLog, addEvent, handleMessage, feedEvents, feedActive, agentFeedLog, teams } = useSessions();
 
   // Resolve hash agent name → AgentState once agents are loaded
   const pendingHashAgent = useRef(hashAgent);
@@ -338,7 +339,7 @@ export function App() {
   if (route === "fleet") {
     return (
       <Layout activeView="fleet" {...layoutProps} statusBarChildren={<FleetControls agents={agents} send={send} />}>
-        <FleetGrid sessions={sessions} agents={agents} connected={connected} send={send} onSelectAgent={onSelectAgent} eventLog={eventLog} addEvent={addEvent} feedActive={feedActive} agentFeedLog={agentFeedLog} />
+        <FleetGrid sessions={sessions} agents={agents} connected={connected} send={send} onSelectAgent={onSelectAgent} eventLog={eventLog} addEvent={addEvent} feedActive={feedActive} agentFeedLog={agentFeedLog} teams={teams} />
       </Layout>
     );
   }
@@ -346,7 +347,7 @@ export function App() {
   if (route === "mission") {
     return (
       <Layout activeView="mission" {...layoutProps}>
-        <MissionControl sessions={sessions} agents={agents} connected={connected} send={send} onSelectAgent={onSelectAgent} eventLog={eventLog} addEvent={addEvent} />
+        <MissionControl sessions={sessions} agents={agents} connected={connected} send={send} onSelectAgent={onSelectAgent} eventLog={eventLog} addEvent={addEvent} teams={teams} />
       </Layout>
     );
   }
@@ -371,6 +372,14 @@ export function App() {
     return (
       <Layout activeView="worktrees" {...layoutProps}>
         <WorktreeView />
+      </Layout>
+    );
+  }
+
+  if (route === "teams") {
+    return (
+      <Layout activeView="teams" {...layoutProps}>
+        <TeamPanel teams={teams} />
       </Layout>
     );
   }

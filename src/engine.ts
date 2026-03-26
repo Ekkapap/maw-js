@@ -2,6 +2,7 @@ import { tmux } from "./tmux";
 import { registerBuiltinHandlers } from "./handlers";
 import { pushCapture, pushPreviews, broadcastSessions, sendBusyAgents } from "./engine.capture";
 import { StatusDetector } from "./engine.status";
+import { broadcastTeams } from "./engine.teams";
 import type { FeedEvent } from "./lib/feed";
 import type { MawWS, Handler } from "./types";
 
@@ -19,6 +20,8 @@ export class MawEngine {
   private sessionInterval: ReturnType<typeof setInterval> | null = null;
   private previewInterval: ReturnType<typeof setInterval> | null = null;
   private statusInterval: ReturnType<typeof setInterval> | null = null;
+  private teamsInterval: ReturnType<typeof setInterval> | null = null;
+  private lastTeamsJson = { value: "" };
   private feedUnsub: (() => void) | null = null;
 
   private feedBuffer: FeedEvent[];
@@ -86,6 +89,10 @@ export class MawEngine {
     this.statusInterval = setInterval(() => {
       this.status.detect(this.sessionCache.sessions, this.clients, this.feedListeners);
     }, 3000);
+    // Watch Agent Teams every 3s — broadcast changes to UI
+    this.teamsInterval = setInterval(() => {
+      broadcastTeams(this.clients, this.lastTeamsJson);
+    }, 3000);
 
     const listener = (event: FeedEvent) => {
       const msg = JSON.stringify({ type: "feed", event });
@@ -101,6 +108,7 @@ export class MawEngine {
     if (this.sessionInterval) { clearInterval(this.sessionInterval); this.sessionInterval = null; }
     if (this.previewInterval) { clearInterval(this.previewInterval); this.previewInterval = null; }
     if (this.statusInterval) { clearInterval(this.statusInterval); this.statusInterval = null; }
+    if (this.teamsInterval) { clearInterval(this.teamsInterval); this.teamsInterval = null; }
     if (this.feedUnsub) { this.feedUnsub(); this.feedUnsub = null; }
   }
 }

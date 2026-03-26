@@ -14,6 +14,12 @@ import { cmdDone } from "./commands/done";
 import { cmdSleepOne } from "./commands/sleep";
 import { cmdTab } from "./commands/tab";
 import { cmdTalkTo } from "./commands/talk-to";
+import { cmdRename } from "./commands/rename";
+import { cmdWorkon } from "./commands/workon";
+import { cmdPark, cmdParkLs, cmdResume } from "./commands/park";
+import { cmdContactsLs, cmdContactsAdd, cmdContactsRm } from "./commands/contacts";
+import { cmdInboxLs, cmdInboxRead, cmdInboxWrite } from "./commands/inbox";
+import { cmdMegaStatus, cmdMegaStop } from "./commands/mega";
 
 const args = process.argv.slice(2);
 const cmd = args[0]?.toLowerCase();
@@ -52,9 +58,23 @@ function usage() {
   maw tokens --json           JSON output for API consumption
   maw log chat [oracle]       Chat view — grouped conversation bubbles
   maw chat [oracle]           Shorthand for log chat
+  maw workon <repo> [task]    Open repo in new tmux window + claude (alias: work)
+  maw rename <tab#> <name>     Rename tab (auto-prefixes oracle name)
+  maw park [window] [note]     Park current (or named) tab with context snapshot
+  maw park ls                  List all parked tabs
+  maw resume [tab#/name]       Resume a parked tab (sends context)
+  maw inbox                    List recent inbox items
+  maw inbox read [N]           Read Nth item (or latest)
+  maw inbox write <note>       Write note to inbox
   maw tab                      List tabs in current session
   maw tab N                    Peek tab N
   maw tab N <msg...>           Send message to tab N
+  maw contacts                List Oracle contacts
+  maw contacts add <name>     Add/update contact (--maw, --thread, --notes)
+  maw contacts rm <name>      Retire a contact (soft delete)
+  maw mega                    Show MegaAgent team hierarchy tree
+  maw mega status             Same — all teams with members + tasks
+  maw mega stop               Kill all active team panes
   maw talk-to <agent> <msg>    Thread + hey (persistent + real-time)
   maw <agent> <msg...>        Shorthand for hey
   maw <agent>                 Shorthand for peek
@@ -206,6 +226,22 @@ if (cmd === "--version" || cmd === "-v") {
   }
 } else if (cmd === "completions") {
   await cmdCompletions(args[1]);
+} else if (cmd === "park") {
+  if (args[1] === "ls" || args[1] === "list") {
+    await cmdParkLs();
+  } else {
+    await cmdPark(...args.slice(1));
+  }
+} else if (cmd === "resume" || cmd === "unpause") {
+  await cmdResume(args[1]);
+} else if (cmd === "inbox") {
+  const sub = args[1]?.toLowerCase();
+  if (sub === "read") await cmdInboxRead(args[2]);
+  else if (sub === "write" && args[2]) await cmdInboxWrite(args.slice(2).join(" "));
+  else await cmdInboxLs();
+} else if (cmd === "rename") {
+  if (!args[1] || !args[2]) { console.error("usage: maw rename <tab# or name> <new-name>"); process.exit(1); }
+  await cmdRename(args[1], args[2]);
 } else if (cmd === "tab" || cmd === "tabs") {
   await cmdTab(args.slice(1));
 } else if (cmd === "view" || cmd === "create-view" || cmd === "attach") {
@@ -213,6 +249,29 @@ if (cmd === "--version" || cmd === "-v") {
   const clean = args.includes("--clean");
   const viewArgs = args.slice(1).filter(a => a !== "--clean");
   await cmdView(viewArgs[0], viewArgs[1], clean);
+} else if (cmd === "contacts" || cmd === "contact") {
+  const sub = args[1]?.toLowerCase();
+  if (sub === "add" && args[2]) await cmdContactsAdd(args[2], args.slice(3));
+  else if ((sub === "rm" || sub === "remove") && args[2]) await cmdContactsRm(args[2]);
+  else await cmdContactsLs();
+} else if (cmd === "mega") {
+  const sub = args[1]?.toLowerCase();
+  if (sub === "status" || sub === "ls" || sub === "tree") {
+    await cmdMegaStatus();
+  } else if (sub === "stop" || sub === "kill") {
+    await cmdMegaStop();
+  } else if (!sub) {
+    await cmdMegaStatus();
+  } else {
+    console.log(`\x1b[36mmaw mega\x1b[0m — MegaAgent hierarchical multi-agent system\n`);
+    console.log(`  maw mega              Show all teams (hierarchy tree)`);
+    console.log(`  maw mega status       Same as above`);
+    console.log(`  maw mega stop         Kill all active team panes\n`);
+    console.log(`\x1b[90mTo start a MegaAgent run, use /mega-agent in Claude Code\x1b[0m`);
+  }
+} else if (cmd === "workon" || cmd === "work") {
+  if (!args[1]) { console.error("usage: maw workon <repo> [task]"); process.exit(1); }
+  await cmdWorkon(args[1], args[2]);
 } else if (cmd === "serve") {
   const { startServer } = await import("./server");
   startServer(args[1] ? +args[1] : 3456);

@@ -14,7 +14,7 @@ import { join } from "path";
 import { createHmac, timingSafeEqual } from "crypto";
 
 // Read config directly (no maw imports — keeps broker standalone)
-const CONFIG_PATH = join(process.env.HOME || "/home/nat", ".config/maw/maw.config.json");
+const CONFIG_PATH = join(process.env.HOME || "/Users/neo", ".config/maw/maw.config.json");
 interface BrokerConfig {
   mqtt?: { port?: number; wsPort?: number };
   federationToken?: string;

@@ -78,8 +78,8 @@ describe("Tmux", () => {
     });
 
     test("with window and cwd", async () => {
-      await t.newSession("s1", { window: "main", cwd: "/home/nat" });
-      expect(commands[0]).toBe("tmux new-session -d -s s1 -n main -c /home/nat 2>/dev/null");
+      await t.newSession("s1", { window: "main", cwd: "/Users/neo" });
+      expect(commands[0]).toBe("tmux new-session -d -s s1 -n main -c /Users/neo 2>/dev/null");
     });
 
     test("non-detached", async () => {
@@ -114,8 +114,8 @@ describe("Tmux", () => {
     });
 
     test("with cwd", async () => {
-      await t.newWindow("oracles", "pulse", { cwd: "/home/nat/pulse" });
-      expect(commands[0]).toBe("tmux new-window -t oracles -n pulse -c /home/nat/pulse 2>/dev/null");
+      await t.newWindow("oracles", "pulse", { cwd: "/Users/neo/pulse" });
+      expect(commands[0]).toBe("tmux new-window -t oracles -n pulse -c /Users/neo/pulse 2>/dev/null");
     });
   });
 

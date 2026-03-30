@@ -21,7 +21,7 @@ function resolvePsiPath(): string {
     const cfg = JSON.parse(readFileSync(join(homedir(), ".config/maw/maw.config.json"), "utf-8"));
     if (cfg.psiPath) return cfg.psiPath;
   } catch { /* expected: config may not exist */ }
-  return "/home/nat/Code/github.com/laris-co/neo-oracle/ψ";
+  return "/Users/neo/Code/github.com/laris-co/neo-oracle/ψ";
 }
 
 function loadContacts(): ContactsFile {

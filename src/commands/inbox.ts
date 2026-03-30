@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const FALLBACK = "/home/nat/Code/github.com/laris-co/neo-oracle/ψ/inbox";
+const FALLBACK = "/Users/neo/Code/github.com/laris-co/neo-oracle/ψ/inbox";
 
 function resolveInboxDir(): string {
   const local = join(process.cwd(), "ψ", "inbox");

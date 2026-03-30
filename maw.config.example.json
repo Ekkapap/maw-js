@@ -1,7 +1,7 @@
 {
   "host": "local",
   "port": 3456,
-  "ghqRoot": "/home/nat/Code/github.com",
+  "ghqRoot": "/Users/neo/Code/github.com",
   "oracleUrl": "http://localhost:47779",
 
   "env": {

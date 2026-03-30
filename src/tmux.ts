@@ -58,25 +58,29 @@ export class Tmux {
   // --- Sessions ---
 
   async listSessions(): Promise<TmuxSession[]> {
-    const raw = await this.run("list-sessions", "-F", "#{session_name}");
-    const sessions: TmuxSession[] = [];
-    for (const s of raw.split("\n").filter(Boolean)) {
-      const windows = await this.listWindows(s);
-      sessions.push({ name: s, windows });
-    }
-    return sessions;
+    try {
+      const raw = await this.run("list-sessions", "-F", "#{session_name}");
+      const sessions: TmuxSession[] = [];
+      for (const s of raw.split("\n").filter(Boolean)) {
+        const windows = await this.listWindows(s);
+        sessions.push({ name: s, windows });
+      }
+      return sessions;
+    } catch { return []; } // no tmux server running
   }
 
   /** List all windows across all sessions in a single tmux call. */
   async listAll(): Promise<TmuxSession[]> {
-    const raw = await this.run("list-windows", "-a", "-F", "#{session_name}|||#{window_index}|||#{window_name}|||#{window_active}|||#{pane_current_path}");
-    const map = new Map<string, TmuxWindow[]>();
-    for (const line of raw.split("\n").filter(Boolean)) {
-      const [session, idx, name, active, cwd] = line.split("|||");
-      if (!map.has(session)) map.set(session, []);
-      map.get(session)!.push({ index: +idx, name, active: active === "1", cwd: cwd || undefined });
-    }
-    return [...map.entries()].map(([name, windows]) => ({ name, windows }));
+    try {
+      const raw = await this.run("list-windows", "-a", "-F", "#{session_name}|||#{window_index}|||#{window_name}|||#{window_active}|||#{pane_current_path}");
+      const map = new Map<string, TmuxWindow[]>();
+      for (const line of raw.split("\n").filter(Boolean)) {
+        const [session, idx, name, active, cwd] = line.split("|||");
+        if (!map.has(session)) map.set(session, []);
+        map.get(session)!.push({ index: +idx, name, active: active === "1", cwd: cwd || undefined });
+      }
+      return [...map.entries()].map(([name, windows]) => ({ name, windows }));
+    } catch { return []; } // no tmux server running
   }
 
   async hasSession(name: string): Promise<boolean> {
@@ -151,12 +155,18 @@ export class Tmux {
     return raw.split("\n")[0] || "";
   }
 
-  /** Batch-check which panes are running what command. */
+  /** Batch-check which panes are running what command — single tmux call. */
   async getPaneCommands(targets: string[]): Promise<Record<string, string>> {
     const result: Record<string, string> = {};
-    await Promise.allSettled(targets.map(async (t) => {
-      try { result[t] = await this.getPaneCommand(t); } catch {}
-    }));
+    try {
+      // Single call: list ALL panes with session:window_index + command
+      const raw = await this.run("list-panes", "-a", "-F", "#{session_name}:#{window_index}|||#{pane_current_command}");
+      const targetSet = new Set(targets);
+      for (const line of raw.split("\n").filter(Boolean)) {
+        const [target, cmd] = line.split("|||");
+        if (targetSet.has(target)) result[target] = cmd || "";
+      }
+    } catch { /* expected: tmux may not be running */ }
     return result;
   }
 
@@ -171,7 +181,7 @@ export class Tmux {
   async getPaneInfos(targets: string[]): Promise<Record<string, { command: string; cwd: string }>> {
     const result: Record<string, { command: string; cwd: string }> = {};
     await Promise.allSettled(targets.map(async (t) => {
-      try { result[t] = await this.getPaneInfo(t); } catch {}
+      try { result[t] = await this.getPaneInfo(t); } catch { /* expected: pane may have closed */ }
     }));
     return result;
   }

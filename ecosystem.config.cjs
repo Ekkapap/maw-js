@@ -6,7 +6,7 @@ module.exports = {
       interpreter: '/home/nat/.bun/bin/bun',
       watch: ['src'],
       watch_delay: 500,
-      ignore_watch: ['node_modules', 'dist-office', 'office'],
+      ignore_watch: ['node_modules', 'ui'],
       env: {
         MAW_HOST: 'local',
         MAW_PORT: '3456',
@@ -22,17 +22,16 @@ module.exports = {
       // Give maw server time to come up
       restart_delay: 5000,
     },
+    // maw-dev moved to Soul-Brews-Studio/maw-ui (bun run dev)
     {
-      name: 'maw-dev',
-      script: 'node_modules/.bin/vite',
-      args: '--host',
-      cwd: './office',
+      name: 'maw-broker',
+      script: 'src/broker.ts',
       interpreter: '/home/nat/.bun/bin/bun',
+      autorestart: true,
+      watch: false,
       env: {
-        NODE_ENV: 'development',
+        MAW_BROKER: '1',
       },
-      // Only start manually: pm2 start ecosystem.config.cjs --only maw-dev
-      autorestart: false,
     },
   ],
 };

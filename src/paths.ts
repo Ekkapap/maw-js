@@ -1,6 +1,8 @@
-import { join } from "path";
+import { join, resolve, dirname } from "path";
 import { mkdirSync } from "fs";
 import { homedir } from "os";
+
+export const MAW_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
 
 export const CONFIG_DIR = process.env.MAW_CONFIG_DIR || join(homedir(), ".config", "maw");
 export const FLEET_DIR = join(CONFIG_DIR, "fleet");

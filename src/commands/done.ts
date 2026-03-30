@@ -5,6 +5,8 @@ import { readdirSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } f
 import { join } from "path";
 import { homedir } from "os";
 import { FLEET_DIR } from "../paths";
+import { cmdReunion } from "./reunion";
+import { takeSnapshot } from "../snapshot";
 
 export interface DoneOpts {
   force?: boolean;
@@ -44,7 +46,7 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
       const parentTarget = parentWindow.replace(/[^a-zA-Z0-9_-]/g, "");
       const inboxDir = join(homedir(), ".oracle", "inbox");
       const signal = JSON.stringify({ ts: new Date().toISOString(), from, type: "done", msg: `worktree ${windowName} completed`, thread: null }) + "\n";
-      try { mkdirSync(inboxDir, { recursive: true }); appendFileSync(join(inboxDir, `${parentTarget}.jsonl`), signal); } catch {}
+      try { mkdirSync(inboxDir, { recursive: true }); appendFileSync(join(inboxDir, `${parentTarget}.jsonl`), signal); } catch (e) { console.error(`  \x1b[33m⚠\x1b[0m inbox signal failed: ${e}`); }
     }
   }
 
@@ -56,7 +58,7 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
     let paneCwd = "";
     try {
       paneCwd = (await ssh(`tmux display-message -t '${target}' -p '#{pane_current_path}'`)).trim();
-    } catch {}
+    } catch { /* expected: pane may not exist */ }
 
     if (opts.dryRun) {
       console.log(`  \x1b[36m⬡\x1b[0m [dry-run] would send /rrr to ${target} and wait 10s`);
@@ -101,6 +103,13 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
         console.log(`  \x1b[33m⚠\x1b[0m git auto-save failed: ${e.message || e}`);
       }
     }
+
+    // Reunion: sync ψ/memory/ from worktree back to main oracle repo
+    if (!opts.dryRun) {
+      await cmdReunion(windowName);
+    } else {
+      console.log(`  \x1b[36m⬡\x1b[0m [dry-run] would run reunion (sync ψ/memory/ to main oracle)`);
+    }
   } else if (opts.dryRun) {
     console.log(`  \x1b[36m⬡\x1b[0m [dry-run] window '${windowName}' not running — nothing to auto-save`);
   }
@@ -138,14 +147,14 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
         try {
           // Detect branch name before removing
           let branch = "";
-          try { branch = (await ssh(`git -C '${fullPath}' rev-parse --abbrev-ref HEAD`)).trim(); } catch {}
+          try { branch = (await ssh(`git -C '${fullPath}' rev-parse --abbrev-ref HEAD`)).trim(); } catch { /* expected: worktree may be corrupt */ }
           await ssh(`git -C '${mainPath}' worktree remove '${fullPath}' --force`);
           await ssh(`git -C '${mainPath}' worktree prune`);
           console.log(`  \x1b[32m✓\x1b[0m removed worktree ${win.repo}`);
           removedWorktree = true;
           // Clean up branch
           if (branch && branch !== "main" && branch !== "HEAD") {
-            try { await ssh(`git -C '${mainPath}' branch -d '${branch}'`); console.log(`  \x1b[32m✓\x1b[0m deleted branch ${branch}`); } catch {}
+            try { await ssh(`git -C '${mainPath}' branch -d '${branch}'`); console.log(`  \x1b[32m✓\x1b[0m deleted branch ${branch}`); } catch { /* expected: branch may have unmerged changes */ }
           }
         } catch (e: any) {
           console.log(`  \x1b[33m⚠\x1b[0m worktree remove failed: ${e.message || e}`);
@@ -153,7 +162,7 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
       }
       break;
     }
-  } catch { /* fleet dir may not exist */ }
+  } catch (e) { console.error(`  \x1b[33m⚠\x1b[0m fleet scan failed: ${e}`); }
 
   if (!removedWorktree) {
     // Try to find worktree by scanning ghq for .wt- dirs matching the window name
@@ -174,17 +183,17 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
         const mainPath = wtPath.replace(base, mainRepo);
         try {
           let branch = "";
-          try { branch = (await ssh(`git -C '${wtPath}' rev-parse --abbrev-ref HEAD`)).trim(); } catch {}
+          try { branch = (await ssh(`git -C '${wtPath}' rev-parse --abbrev-ref HEAD`)).trim(); } catch { /* expected: worktree may be corrupt */ }
           await ssh(`git -C '${mainPath}' worktree remove '${wtPath}' --force`);
           await ssh(`git -C '${mainPath}' worktree prune`);
           console.log(`  \x1b[32m✓\x1b[0m removed worktree ${base}`);
           removedWorktree = true;
           if (branch && branch !== "main" && branch !== "HEAD") {
-            try { await ssh(`git -C '${mainPath}' branch -d '${branch}'`); console.log(`  \x1b[32m✓\x1b[0m deleted branch ${branch}`); } catch {}
+            try { await ssh(`git -C '${mainPath}' branch -d '${branch}'`); console.log(`  \x1b[32m✓\x1b[0m deleted branch ${branch}`); } catch { /* expected: branch may have unmerged changes */ }
           }
-        } catch {}
+        } catch (e) { console.error(`  \x1b[33m⚠\x1b[0m worktree remove failed: ${e}`); }
       }
-    } catch { /* no matching worktrees */ }
+    } catch (e) { console.error(`  \x1b[33m⚠\x1b[0m worktree scan failed: ${e}`); }
   }
 
   if (!removedWorktree) {
@@ -210,6 +219,9 @@ export async function cmdDone(windowName_: string, opts: DoneOpts = {}) {
   if (!removedFromConfig) {
     console.log(`  \x1b[90m○\x1b[0m not in any fleet config`);
   }
+
+  // Snapshot after done
+  takeSnapshot("done").catch(() => {});
 
   console.log();
 }

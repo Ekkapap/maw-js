@@ -5,16 +5,17 @@
  * Prefer system mosquitto; this is the Aedes fallback.
  */
 
-import { Aedes } from "aedes";
+import { Aedes, AuthErrorCode } from "aedes";
 import { createServer } from "net";
 import { WebSocketServer } from "ws";
 import { Duplex } from "stream";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { createHmac, timingSafeEqual } from "crypto";
 
 // Read config directly (no maw imports — keeps broker standalone)
-const CONFIG_PATH = join(process.env.HOME || "/Users/neo", ".config/maw/maw.config.json");
+const CONFIG_PATH = join(process.env.HOME || homedir() || "/Users/neo", ".config/maw/maw.config.json");
 interface BrokerConfig {
   mqtt?: { port?: number; wsPort?: number };
   federationToken?: string;
@@ -22,8 +23,8 @@ interface BrokerConfig {
 let config: BrokerConfig = {};
 try { config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")); } catch {}
 
-const MQTT_PORT = config.mqtt?.port || 1883;
-const WS_PORT = config.mqtt?.wsPort || 9883;
+const MQTT_PORT = config.mqtt?.port ?? 1883;
+const WS_PORT = config.mqtt?.wsPort ?? 9883;
 const TOKEN = config.federationToken || "";
 
 // --- Aedes broker ---
@@ -33,15 +34,15 @@ const aedes = await Aedes.createBroker();
 // HMAC auth (same pattern as federation-auth.ts)
 if (TOKEN) {
   aedes.authenticate = (_client, username, password, callback) => {
-    if (!password) return callback(new Error("password required"), false);
+    if (!password) return callback({name: 'BAD_USERNAME_OR_PASSWORD', message: 'password required',returnCode: AuthErrorCode.BAD_USERNAME_OR_PASSWORD}, false);
     const pw = password.toString();
     const parts = pw.split(":");
-    if (parts.length !== 2) return callback(new Error("bad format"), false);
+    if (parts.length !== 2) return callback({name: 'BAD_USERNAME_OR_PASSWORD', message: 'format', returnCode: AuthErrorCode.BAD_USERNAME_OR_PASSWORD},false);
     const [sig, tsStr] = parts;
     const ts = parseInt(tsStr, 10);
-    if (isNaN(ts)) return callback(new Error("bad timestamp"), false);
+    if (isNaN(ts)) return callback({name: 'IDENTIFIER_REJECTED', message: 'bad timestamp', returnCode: AuthErrorCode.IDENTIFIER_REJECTED},false);
     const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - ts) > 300) return callback(new Error("expired"), false);
+    if (Math.abs(now - ts) > 300) return callback({name: 'BAD_USERNAME_OR_PASSWORD', message: 'expired', returnCode: AuthErrorCode.BAD_USERNAME_OR_PASSWORD},false);
     const expected = createHmac("sha256", TOKEN)
       .update(`MQTT:${username || "maw"}:${ts}`)
       .digest("hex");
@@ -49,7 +50,7 @@ if (TOKEN) {
       const ok = timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"));
       callback(null, ok);
     } catch {
-      callback(new Error("auth failed"), false);
+      callback({name: 'NOT_AUTHORIZED',message: 'auth failed', returnCode: AuthErrorCode.NOT_AUTHORIZED}, false);
     }
   };
 }
@@ -72,7 +73,7 @@ wss.on("connection", (ws) => {
   const duplex = new Duplex({
     read() {},
     write(chunk, _encoding, cb) {
-      try { ws.send(chunk); cb(); } catch (e: Error) { cb(e); }
+      try { ws.send(chunk); cb(); } catch (e: unknown | Error) { cb(e as Error); }
     },
     final(cb) { ws.close(); cb(); },
   });

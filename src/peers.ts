@@ -1,6 +1,10 @@
-import { loadConfig } from "./config";
+import { loadConfig, cfgTimeout } from "./config";
 import type { Session } from "./ssh";
 import { curlFetch } from "./curl-fetch";
+
+/** Simple TTL cache for aggregated sessions (#145) */
+let aggregatedCache: { peers: (Session & { source?: string })[]; ts: number } | null = null;
+const CACHE_TTL = 30_000;
 
 export interface PeerStatus {
   url: string;
@@ -14,7 +18,7 @@ export interface PeerStatus {
 async function checkPeerReachable(url: string): Promise<{ reachable: boolean; latency: number }> {
   const start = Date.now();
   try {
-    const res = await curlFetch(`${url}/api/sessions`, { timeout: 5000 });
+    const res = await curlFetch(`${url}/api/sessions`, { timeout: cfgTimeout("http") });
     const latency = Date.now() - start;
     return { reachable: res.ok, latency };
   } catch {
@@ -35,7 +39,7 @@ export function getPeers(): string[] {
  */
 async function fetchPeerSessions(url: string): Promise<Session[]> {
   try {
-    const res = await curlFetch(`${url}/api/sessions`, { timeout: 5000 });
+    const res = await curlFetch(`${url}/api/sessions?local=true`, { timeout: cfgTimeout("http") });
     if (!res.ok) return [];
     return res.data || [];
   } catch {
@@ -52,7 +56,12 @@ export async function getAggregatedSessions(localSessions: Session[]): Promise<(
     return localSessions;
   }
 
-  const result: (Session & { source?: string })[] = localSessions.map(s => ({ ...s, source: "local" }));
+  const local: (Session & { source?: string })[] = localSessions.map(s => ({ ...s, source: "local" }));
+
+  // Return cached peer sessions if fresh (#145)
+  if (aggregatedCache && Date.now() - aggregatedCache.ts < CACHE_TTL) {
+    return [...local, ...aggregatedCache.peers];
+  }
 
   // Fetch sessions from all peers in parallel
   const peerResults = await Promise.all(peers.map(async (url) => {
@@ -60,8 +69,10 @@ export async function getAggregatedSessions(localSessions: Session[]): Promise<(
     return sessions.map(s => ({ ...s, source: url }));
   }));
 
-  // Flatten and return all sessions
-  return result.concat(...peerResults);
+  const peerSessions = peerResults.flat();
+  aggregatedCache = { peers: peerSessions, ts: Date.now() };
+
+  return [...local, ...peerSessions];
 }
 
 /**
@@ -75,7 +86,7 @@ export async function getFederationStatus(): Promise<{
 }> {
   const config = loadConfig();
   const peers = getPeers();
-  const port = config.port || 3456;
+  const port = loadConfig().port;
   const localUrl = `http://localhost:${port}`;
 
   const statuses = await Promise.all(peers.map(async (url) => {
@@ -110,7 +121,7 @@ export async function sendKeysToPeer(peerUrl: string, target: string, text: stri
     const res = await curlFetch(`${peerUrl}/api/send`, {
       method: "POST",
       body: JSON.stringify({ target, text }),
-      timeout: 5000,
+      timeout: cfgTimeout("http"),
     });
     return res.ok;
   } catch {

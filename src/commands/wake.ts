@@ -1,6 +1,6 @@
 import { ssh } from "../ssh";
 import { tmux } from "../tmux";
-import { loadConfig, buildCommand, getEnvVars } from "../config";
+import { loadConfig, buildCommand, getEnvVars, cfgTimeout } from "../config";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { FLEET_DIR } from "../paths";
@@ -12,7 +12,7 @@ import { takeSnapshot } from "../snapshot";
  * Verify all windows in a session are running Claude (not empty zsh).
  * Retries buildCommand for any that are still on a shell prompt.
  */
-export async function ensureSessionRunning(session: string): Promise<number> {
+export async function ensureSessionRunning(session: string, excludeNames?: Set<string>): Promise<number> {
   let retried = 0;
   let windows: { index: number; name: string; active: boolean }[];
   try {
@@ -23,12 +23,13 @@ export async function ensureSessionRunning(session: string): Promise<number> {
   const cmds = await tmux.getPaneCommands(targets);
 
   for (const win of windows) {
+    if (excludeNames?.has(win.name)) continue; // Skip pre-existing windows (#147)
     const target = `${session}:${win.name}`;
     const paneCmd = (cmds[target] || "").trim().toLowerCase();
 
     if (paneCmd === "zsh" || paneCmd === "bash" || paneCmd === "sh" || paneCmd === "") {
       try {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, cfgTimeout("wakeRetry")));
         await tmux.sendText(target, buildCommand(win.name));
         console.log(`\x1b[33m↻\x1b[0m retry: ${win.name} (was ${paneCmd || "empty"})`);
         retried++;
@@ -203,7 +204,7 @@ function sanitizeBranchName(name: string): string {
     .slice(0, 50);
 }
 
-export async function cmdWake(oracle: string, opts: { task?: string; newWt?: string; prompt?: string; incubate?: string }): Promise<string> {
+export async function cmdWake(oracle: string, opts: { task?: string; newWt?: string; prompt?: string; incubate?: string; fresh?: boolean; noAttach?: boolean; listWt?: boolean }): Promise<string> {
   let resolved: { repoPath: string; repoName: string; parentDir: string };
 
   if (opts.incubate) {
@@ -258,15 +259,18 @@ export async function cmdWake(oracle: string, opts: { task?: string; newWt?: str
     // Ensure env vars are set on existing session (may predate this fix)
     await setSessionEnv(session);
 
+    // Capture windows that existed BEFORE we respawn anything (#147)
+    let preExistingWindows = new Set<string>();
+    try {
+      const existingWins = await tmux.listWindows(session);
+      preExistingWindows = new Set(existingWins.map(w => w.name));
+    } catch { /* ok */ }
+
     // Respawn missing worktree windows (e.g. after reboot)
     if (!opts.task && !opts.newWt) {
       const allWt = await findWorktrees(parentDir, repoName);
       if (allWt.length > 0) {
-        let existingWindows: string[] = [];
-        try {
-          const windows = await tmux.listWindows(session);
-          existingWindows = windows.map(w => w.name);
-        } catch { /* ok */ }
+        const existingWindows = [...preExistingWindows];
 
         const usedNames = new Set(existingWindows);
         for (const wt of allWt) {
@@ -286,9 +290,10 @@ export async function cmdWake(oracle: string, opts: { task?: string; newWt?: str
       }
     }
 
-    // Verify all windows started Claude (not stuck on zsh)
-    await new Promise(r => setTimeout(r, 3000));
-    const retried = await ensureSessionRunning(session);
+    // Verify newly-created windows started Claude (not stuck on zsh)
+    // Skip pre-existing windows to avoid injecting into active sessions (#147)
+    await new Promise(r => setTimeout(r, cfgTimeout("wakeVerify")));
+    const retried = await ensureSessionRunning(session, preExistingWindows);
     if (retried > 0) console.log(`\x1b[33m${retried} window(s) retried.\x1b[0m`);
   }
 
@@ -301,21 +306,40 @@ export async function cmdWake(oracle: string, opts: { task?: string; newWt?: str
   let targetPath = repoPath;
   let windowName = `${oracle}-oracle`;
 
+  // --list: show available worktrees and exit
+  if (opts.listWt) {
+    const worktrees = await findWorktrees(parentDir, repoName);
+    if (!worktrees.length) {
+      console.log(`\x1b[90mNo worktrees for ${oracle}.\x1b[0m`);
+    } else {
+      console.log(`\n\x1b[36mWorktrees for ${oracle}\x1b[0m (${worktrees.length})\n`);
+      for (const wt of worktrees) {
+        console.log(`  \x1b[32m●\x1b[0m ${wt.name}  \x1b[90m${wt.path}\x1b[0m`);
+      }
+      console.log(`\n\x1b[90mUsage: maw wake ${oracle} <name>          — attach (or create)\x1b[0m`);
+      console.log(`\x1b[90m       maw wake ${oracle} <name> --fresh   — force create new\x1b[0m`);
+      console.log(`\x1b[90m       maw wake ${oracle} <name> --no-attach — create but don't select\x1b[0m`);
+    }
+    return `${session}:${windowName}`;
+  }
+
   if (opts.newWt || opts.task) {
     const rawName = opts.newWt || opts.task!;
     const name = sanitizeBranchName(rawName);
     const worktrees = await findWorktrees(parentDir, repoName);
 
-    // Try to find existing worktree matching this name
-    const match = worktrees.find(w => w.name.endsWith(`-${name}`) || w.name === name);
+    // Try to find existing worktree matching this name (default: auto-attach)
+    const match = !opts.fresh
+      ? worktrees.find(w => w.name.endsWith(`-${name}`) || w.name === name)
+      : null;
 
     if (match) {
-      // Reuse existing worktree
+      // Reuse existing worktree (default behavior)
       console.log(`\x1b[33m⚡\x1b[0m reusing worktree: ${match.path}`);
       targetPath = match.path;
       windowName = `${oracle}-${name}`;
     } else {
-      // Create new worktree
+      // Create new worktree (default when no match, or --fresh)
       const nums = worktrees.map(w => parseInt(w.name) || 0);
       const nextNum = nums.length > 0 ? Math.max(...nums) + 1 : 1;
       const wtName = `${nextNum}-${name}`;
@@ -361,7 +385,7 @@ export async function cmdWake(oracle: string, opts: { task?: string; newWt?: str
         return `${session}:${existingWindow}`;
       }
       console.log(`\x1b[33m⚡\x1b[0m '${existingWindow}' already running in ${session}`);
-      await tmux.selectWindow(`${session}:${existingWindow}`);
+      if (!opts.noAttach) await tmux.selectWindow(`${session}:${existingWindow}`);
       return `${session}:${existingWindow}`;
     }
   } catch { /* session might be fresh */ }

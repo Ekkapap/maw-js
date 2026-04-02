@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { loadConfig } from "../config";
 
 interface Contact {
   maw?: string;
@@ -15,6 +16,8 @@ interface ContactsFile {
 }
 
 function resolvePsiPath(): string {
+  const config = loadConfig();
+  if (config.psiPath) return config.psiPath;
   const cwd = process.cwd();
   if (existsSync(join(cwd, "ψ"))) return join(cwd, "ψ");
   try {
@@ -22,6 +25,7 @@ function resolvePsiPath(): string {
     if (cfg.psiPath) return cfg.psiPath;
   } catch { /* expected: config may not exist */ }
   return "/Users/neo/Code/github.com/laris-co/neo-oracle/ψ";
+  return join(cwd, "psi");
 }
 
 function loadContacts(): ContactsFile {
